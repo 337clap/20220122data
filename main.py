@@ -10,31 +10,42 @@ st.set_page_config(page_title="기온 비교", layout="wide")
 
 
 # -----------------------------
-# UI 스타일 (제목/부제/metric 카드 폰트 & 잘림 방지)
+# UI 스타일 (상단 잘림/클리핑 방지 + metric 카드)
 # -----------------------------
 st.markdown(
     """
 <style>
-/* 전체 폭/여백 */
+/* Streamlit 상단 헤더가 콘텐츠를 덮는 경우가 있어, 헤더 높이/투명도 처리 */
+header[data-testid="stHeader"] {
+    height: 64px;
+    background: rgba(255,255,255,0.98);
+}
+
+/* 최상단이 잘리는 현상 방지: padding-top을 충분히 확보 */
 .block-container {
-    padding-top: 1.2rem;
+    padding-top: 5.2rem;   /* 핵심: 여기 크게 */
+    padding-bottom: 2rem;
     max-width: 1400px;
 }
 
-/* 큰 제목 */
+/* 타이틀 영역에도 추가 padding */
+.title-wrap {
+    padding-top: 0.4rem;
+    margin-bottom: 1.1rem;
+}
+
 .app-title {
-    font-size: 2.1rem;
+    font-size: 2.0rem;
     font-weight: 800;
     line-height: 1.15;
-    margin: 0 0 0.2rem 0;
+    margin: 0;
     word-break: keep-all;
 }
 
-/* 부제 */
 .app-subtitle {
     font-size: 0.95rem;
     color: rgba(0,0,0,0.62);
-    margin: 0 0 1.2rem 0;
+    margin: 0.35rem 0 0 0;
     word-break: keep-all;
 }
 
@@ -56,7 +67,7 @@ st.markdown(
 }
 
 .metric-value {
-    font-size: 2.0rem;
+    font-size: 1.9rem;
     font-weight: 800;
     line-height: 1.15;
     word-break: keep-all;
@@ -70,22 +81,28 @@ st.markdown(
     white-space: nowrap;
 }
 
-/* 작은 화면에서 글자 자동 축소 */
+/* 작은 화면 대응 */
 @media (max-width: 1100px) {
-    .metric-value { font-size: 1.6rem; }
+    .metric-value { font-size: 1.55rem; }
 }
 @media (max-width: 700px) {
-    .app-title { font-size: 1.7rem; }
-    .metric-value { font-size: 1.3rem; }
+    header[data-testid="stHeader"] { height: 72px; }
+    .block-container { padding-top: 5.8rem; }
+    .app-title { font-size: 1.65rem; }
+    .metric-value { font-size: 1.25rem; }
 }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-st.markdown('<div class="app-title">📈 기온 비교 웹앱</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="app-subtitle">Streamlit + Plotly (업로드 CSV 자동 병합 · 같은 월-일 기준 비교)</div>',
+    """
+<div class="title-wrap">
+  <div class="app-title">📈 기온 비교 웹앱</div>
+  <div class="app-subtitle">Streamlit + Plotly (업로드 CSV 자동 병합 · 같은 월-일 기준 비교)</div>
+</div>
+""",
     unsafe_allow_html=True,
 )
 
@@ -94,7 +111,6 @@ st.markdown(
 # Plotly 세로선 안전 추가 (환경/버전 TypeError 방지)
 # -----------------------------
 def add_vline_safe(fig, x, annotation_text=None):
-    # pandas.Timestamp -> python datetime 변환
     if hasattr(x, "to_pydatetime"):
         x = x.to_pydatetime()
 
@@ -103,7 +119,6 @@ def add_vline_safe(fig, x, annotation_text=None):
         if annotation_text:
             fig.add_annotation(x=x, y=1, yref="paper", text=annotation_text, showarrow=False)
     except Exception:
-        # add_vline이 실패하면 add_shape로 fallback
         fig.add_shape(
             type="line",
             x0=x,
@@ -122,8 +137,7 @@ def add_vline_safe(fig, x, annotation_text=None):
 # Parsing helpers (KMA-style CSV export)
 # -----------------------------
 def _find_header_row(raw: pd.DataFrame) -> int:
-    """첫 컬럼에 '날짜'가 등장하는 행을 헤더로 간주."""
-    for i in range(min(len(raw), 400)):
+    for i in range(min(len(raw), 500)):
         v = raw.iloc[i, 0]
         if isinstance(v, str) and v.strip() == "날짜":
             return i
@@ -131,13 +145,6 @@ def _find_header_row(raw: pd.DataFrame) -> int:
 
 
 def parse_kma_like_csv(file_bytes: bytes) -> pd.DataFrame:
-    """
-    Expected columns (Korean):
-      날짜, 지점, 평균기온(℃), 최저기온(℃), 최고기온(℃)
-
-    Returns standardized:
-      date, station, tavg, tmin, tmax
-    """
     raw = pd.read_csv(io.BytesIO(file_bytes), dtype=str, header=0, encoding="utf-8", engine="python")
     hdr_idx = _find_header_row(raw)
 
@@ -146,7 +153,6 @@ def parse_kma_like_csv(file_bytes: bytes) -> pd.DataFrame:
     df.columns = header
     df = df.dropna(how="all")
 
-    # Normalize header spaces
     df.columns = [c.strip() if isinstance(c, str) else c for c in df.columns]
 
     required = ["날짜", "지점", "평균기온(℃)", "최저기온(℃)", "최고기온(℃)"]
@@ -154,15 +160,12 @@ def parse_kma_like_csv(file_bytes: bytes) -> pd.DataFrame:
     if missing:
         raise ValueError(f"필수 컬럼이 없습니다: {missing}. 업로드 파일이 샘플과 같은 형식인지 확인해 주세요.")
 
-    # Clean date column
     df["날짜"] = df["날짜"].astype(str).str.replace("\t", "", regex=False).str.strip()
     df["date"] = pd.to_datetime(df["날짜"], errors="coerce")
     df = df[df["date"].notna()]
 
-    # Station
     df["station"] = pd.to_numeric(df["지점"], errors="coerce").astype("Int64")
 
-    # Temperatures
     for src, dst in [("평균기온(℃)", "tavg"), ("최저기온(℃)", "tmin"), ("최고기온(℃)", "tmax")]:
         df[dst] = pd.to_numeric(df[src].astype(str).str.strip(), errors="coerce")
 
@@ -188,9 +191,6 @@ def merge_datasets(base: pd.DataFrame, extra_frames: list[pd.DataFrame]) -> pd.D
 
 
 def day_of_year_stats(df: pd.DataFrame, target_dt: pd.Timestamp, metric: str) -> dict:
-    """
-    Compare target date's metric to distribution of same month-day across all years.
-    """
     month = int(target_dt.month)
     day = int(target_dt.day)
 
@@ -225,7 +225,7 @@ def day_of_year_stats(df: pd.DataFrame, target_dt: pd.Timestamp, metric: str) ->
 
 
 # -----------------------------
-# Sidebar controls
+# Sidebar
 # -----------------------------
 with st.sidebar:
     st.header("데이터")
@@ -247,7 +247,7 @@ with st.sidebar:
 # -----------------------------
 # Load + merge
 # -----------------------------
-BASE_PATH = "temp.csv"  # ✅ 루트에 temp.csv
+BASE_PATH = "temp.csv"
 
 try:
     base = load_base_dataset(BASE_PATH)
@@ -271,34 +271,24 @@ if df.empty:
     st.error("데이터가 비어 있습니다.")
     st.stop()
 
-# 지점 선택 (여러 지점이면 드롭다운)
 stations = df["station"].dropna().unique()
 stations = sorted([int(x) for x in stations]) if len(stations) else []
-station = None
-if stations:
-    station = st.sidebar.selectbox("지점 선택", options=stations, index=0)
-
+station = st.sidebar.selectbox("지점 선택", options=stations, index=0) if stations else None
 dff = df[df["station"] == station].copy() if station is not None else df.copy()
 
-# -----------------------------
-# Determine target date
-# -----------------------------
 last_dt = dff["date"].max()
-if use_latest:
-    target_dt = pd.Timestamp(last_dt.date())
-else:
-    target_dt = pd.Timestamp(pick)
+target_dt = pd.Timestamp(last_dt.date()) if use_latest else pd.Timestamp(pick)
 
-# 선택한 날짜 데이터가 없으면, 가장 가까운 이전 날짜로 보정
 if (dff["date"] == target_dt).sum() == 0:
     prev = dff[dff["date"] <= target_dt]["date"]
     target_dt = prev.max() if not prev.empty else dff["date"].min()
 
-# -----------------------------
-# Summary (커스텀 metric 카드)
-# -----------------------------
 stats = day_of_year_stats(dff, target_dt, metric)
 
+
+# -----------------------------
+# Summary cards
+# -----------------------------
 c1, c2, c3, c4 = st.columns(4)
 
 with c1:
