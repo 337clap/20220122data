@@ -30,7 +30,7 @@ def parse_kma_like_csv(file_bytes: bytes) -> pd.DataFrame:
     hdr_idx = _find_header_row(raw)
 
     header = raw.iloc[hdr_idx].tolist()
-    df = raw.iloc[hdr_idx + 1:].copy()
+    df = raw.iloc[hdr_idx + 1 :].copy()
     df.columns = header
     df = df.dropna(how="all")
 
@@ -122,7 +122,7 @@ st.title("📈 기온 비교 웹앱 (Streamlit + Plotly)")
 
 with st.sidebar:
     st.header("데이터")
-    st.caption("기본 데이터(data/base.csv)는 앱에 포함됩니다. 같은 형식 CSV를 업로드하면 자동 병합됩니다.")
+    st.caption("기본 데이터는 저장소 루트의 temp.csv를 사용합니다. 같은 형식 CSV를 업로드하면 자동 병합됩니다.")
     uploaded = st.file_uploader("추가 CSV 업로드 (여러 개 가능)", type=["csv"], accept_multiple_files=True)
 
     st.divider()
@@ -136,12 +136,13 @@ with st.sidebar:
     metric_map = {"평균기온(℃)": "tavg", "최저기온(℃)": "tmin", "최고기온(℃)": "tmax"}
     metric = metric_map[metric_label]
 
-# Load base dataset
-BASE_PATH = "data/base.csv"
+# ✅ 여기만 핵심 변경: base 파일 경로를 temp.csv로
+BASE_PATH = "temp.csv"
+
 try:
     base = load_base_dataset(BASE_PATH)
 except FileNotFoundError:
-    st.error("기본 데이터 파일(data/base.csv)을 찾지 못했습니다. 저장소에 포함해 주세요.")
+    st.error("기본 데이터 파일(temp.csv)을 찾지 못했습니다. 저장소 루트에 temp.csv를 포함해 주세요.")
     st.stop()
 except Exception as e:
     st.error(f"기본 데이터 로드/파싱 실패: {e}")
