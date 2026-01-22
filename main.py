@@ -10,28 +10,73 @@ st.set_page_config(page_title="기온 비교", layout="wide")
 
 
 # -----------------------------
-# UI 스타일 (제목 줄바꿈/크기/여백 안정화)
+# UI 스타일 (제목/부제/metric 카드 폰트 & 잘림 방지)
 # -----------------------------
 st.markdown(
     """
 <style>
-/* 전체 상단 여백 살짝 줄이기 */
-.block-container { padding-top: 1.3rem; }
-
-/* 큰 제목 스타일 */
-.app-title {
-  font-size: 2.4rem;
-  font-weight: 800;
-  line-height: 1.15;
-  margin: 0 0 0.25rem 0;
-  word-break: keep-all;
+/* 전체 폭/여백 */
+.block-container {
+    padding-top: 1.2rem;
+    max-width: 1400px;
 }
 
-/* 부제목 */
+/* 큰 제목 */
+.app-title {
+    font-size: 2.1rem;
+    font-weight: 800;
+    line-height: 1.15;
+    margin: 0 0 0.2rem 0;
+    word-break: keep-all;
+}
+
+/* 부제 */
 .app-subtitle {
-  color: rgba(0,0,0,0.6);
-  margin: 0 0 1rem 0;
-  font-size: 1rem;
+    font-size: 0.95rem;
+    color: rgba(0,0,0,0.62);
+    margin: 0 0 1.2rem 0;
+    word-break: keep-all;
+}
+
+/* metric 카드 */
+.metric-box {
+    background: #fafafa;
+    padding: 0.85rem 1rem;
+    border-radius: 14px;
+    text-align: center;
+    border: 1px solid #eee;
+    overflow: hidden;
+}
+
+.metric-label {
+    font-size: 0.85rem;
+    color: rgba(0,0,0,0.55);
+    margin-bottom: 0.2rem;
+    white-space: nowrap;
+}
+
+.metric-value {
+    font-size: 2.0rem;
+    font-weight: 800;
+    line-height: 1.15;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+}
+
+.metric-delta {
+    font-size: 0.9rem;
+    margin-top: 0.35rem;
+    color: #d62728;
+    white-space: nowrap;
+}
+
+/* 작은 화면에서 글자 자동 축소 */
+@media (max-width: 1100px) {
+    .metric-value { font-size: 1.6rem; }
+}
+@media (max-width: 700px) {
+    .app-title { font-size: 1.7rem; }
+    .metric-value { font-size: 1.3rem; }
 }
 </style>
 """,
@@ -39,7 +84,10 @@ st.markdown(
 )
 
 st.markdown('<div class="app-title">📈 기온 비교 웹앱</div>', unsafe_allow_html=True)
-st.markdown('<div class="app-subtitle">Streamlit + Plotly (업로드 CSV 자동 병합, 같은 월-일 기준 비교)</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="app-subtitle">Streamlit + Plotly (업로드 CSV 자동 병합 · 같은 월-일 기준 비교)</div>',
+    unsafe_allow_html=True,
+)
 
 
 # -----------------------------
@@ -74,7 +122,7 @@ def add_vline_safe(fig, x, annotation_text=None):
 # Parsing helpers (KMA-style CSV export)
 # -----------------------------
 def _find_header_row(raw: pd.DataFrame) -> int:
-    """Find the row index that contains the real header (e.g., first column == '날짜')."""
+    """첫 컬럼에 '날짜'가 등장하는 행을 헤더로 간주."""
     for i in range(min(len(raw), 400)):
         v = raw.iloc[i, 0]
         if isinstance(v, str) and v.strip() == "날짜":
@@ -84,7 +132,7 @@ def _find_header_row(raw: pd.DataFrame) -> int:
 
 def parse_kma_like_csv(file_bytes: bytes) -> pd.DataFrame:
     """
-    Expected columns in the file (Korean):
+    Expected columns (Korean):
       날짜, 지점, 평균기온(℃), 최저기온(℃), 최고기온(℃)
 
     Returns standardized:
@@ -106,7 +154,7 @@ def parse_kma_like_csv(file_bytes: bytes) -> pd.DataFrame:
     if missing:
         raise ValueError(f"필수 컬럼이 없습니다: {missing}. 업로드 파일이 샘플과 같은 형식인지 확인해 주세요.")
 
-    # Clean date column (remove tabs/spaces)
+    # Clean date column
     df["날짜"] = df["날짜"].astype(str).str.replace("\t", "", regex=False).str.strip()
     df["date"] = pd.to_datetime(df["날짜"], errors="coerce")
     df = df[df["date"].notna()]
@@ -141,8 +189,7 @@ def merge_datasets(base: pd.DataFrame, extra_frames: list[pd.DataFrame]) -> pd.D
 
 def day_of_year_stats(df: pd.DataFrame, target_dt: pd.Timestamp, metric: str) -> dict:
     """
-    Compare target date's metric to the distribution of the same month-day across all years.
-    Returns dict with value, mean, median, std, diff, z, pct_rank, n.
+    Compare target date's metric to distribution of same month-day across all years.
     """
     month = int(target_dt.month)
     day = int(target_dt.day)
@@ -155,7 +202,7 @@ def day_of_year_stats(df: pd.DataFrame, target_dt: pd.Timestamp, metric: str) ->
     val = float(target_val.iloc[-1])
 
     if same_md.empty:
-        return {"ok": False, "reason": "같은 월-일(예: 01-22)에 대한 과거 분포가 없습니다."}
+        return {"ok": False, "reason": "같은 월-일의 과거 분포가 없습니다."}
 
     mean = float(same_md.mean())
     median = float(same_md.median())
@@ -182,7 +229,7 @@ def day_of_year_stats(df: pd.DataFrame, target_dt: pd.Timestamp, metric: str) ->
 # -----------------------------
 with st.sidebar:
     st.header("데이터")
-    st.caption("기본 데이터는 저장소 루트의 temp.csv를 사용합니다. 같은 형식 CSV를 업로드하면 자동으로 병합됩니다.")
+    st.caption("기본 데이터는 저장소 루트의 temp.csv를 사용합니다. 같은 형식 CSV를 업로드하면 자동 병합됩니다.")
     uploaded = st.file_uploader("추가 CSV 업로드 (여러 개 가능)", type=["csv"], accept_multiple_files=True)
 
     st.divider()
@@ -224,7 +271,7 @@ if df.empty:
     st.error("데이터가 비어 있습니다.")
     st.stop()
 
-# 지점 선택 (여러 지점이면 드롭다운 제공)
+# 지점 선택 (여러 지점이면 드롭다운)
 stations = df["station"].dropna().unique()
 stations = sorted([int(x) for x in stations]) if len(stations) else []
 station = None
@@ -242,27 +289,90 @@ if use_latest:
 else:
     target_dt = pd.Timestamp(pick)
 
-# If chosen date not exists, fallback to nearest previous date
+# 선택한 날짜 데이터가 없으면, 가장 가까운 이전 날짜로 보정
 if (dff["date"] == target_dt).sum() == 0:
     prev = dff[dff["date"] <= target_dt]["date"]
     target_dt = prev.max() if not prev.empty else dff["date"].min()
 
 # -----------------------------
-# Summary
+# Summary (커스텀 metric 카드)
 # -----------------------------
 stats = day_of_year_stats(dff, target_dt, metric)
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("선택 날짜", target_dt.strftime("%Y-%m-%d"))
-c2.metric("지점", str(station) if station is not None else "N/A")
+
+with c1:
+    st.markdown(
+        f"""
+        <div class="metric-box">
+            <div class="metric-label">선택 날짜</div>
+            <div class="metric-value">{target_dt.strftime('%Y-%m-%d')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with c2:
+    st.markdown(
+        f"""
+        <div class="metric-box">
+            <div class="metric-label">지점</div>
+            <div class="metric-value">{station if station is not None else "N/A"}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 if stats.get("ok"):
-    c3.metric(f"{metric_label}", f"{stats['val']:.1f}℃", delta=f"{stats['diff']:+.1f}℃ (평균 대비)")
-    z_txt = "—" if np.isnan(stats["z"]) else f"{stats['z']:+.2f}σ"
-    c4.metric("과거 동일 월-일 대비", f"{stats['pct_rank']:.1f}퍼센타일", delta=z_txt)
+    diff = stats["diff"]
+    z = stats["z"]
+    z_txt = "—" if np.isnan(z) else f"{z:+.2f}σ"
+
+    with c3:
+        st.markdown(
+            f"""
+            <div class="metric-box">
+                <div class="metric-label">{metric_label}</div>
+                <div class="metric-value">{stats['val']:.1f}℃</div>
+                <div class="metric-delta">{diff:+.1f}℃ (평균 대비)</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with c4:
+        st.markdown(
+            f"""
+            <div class="metric-box">
+                <div class="metric-label">과거 동일 월-일 대비</div>
+                <div class="metric-value">{stats['pct_rank']:.1f}퍼센타일</div>
+                <div class="metric-delta">{z_txt}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 else:
-    c3.metric(f"{metric_label}", "N/A")
-    c4.metric("비교", stats.get("reason", "N/A"))
+    with c3:
+        st.markdown(
+            """
+            <div class="metric-box">
+                <div class="metric-label">기온</div>
+                <div class="metric-value">N/A</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with c4:
+        st.markdown(
+            f"""
+            <div class="metric-box">
+                <div class="metric-label">비교</div>
+                <div class="metric-value">N/A</div>
+                <div class="metric-delta">{stats.get("reason","")}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 st.caption("비교 기준: 선택한 날짜와 같은 **월-일(MM-DD)**의 과거(모든 연도) 분포와 비교합니다.")
 
@@ -310,7 +420,7 @@ with right:
         long["metric"] = long["metric"].map(label_map)
 
         fig2 = px.line(long, x="date", y="temp", color="metric", markers=True, title="최근 30일 기온 추이")
-        add_vline_safe(fig2, target_dt, annotation_text="선택 날짜")  # ✅ TypeError 방지
+        add_vline_safe(fig2, target_dt, annotation_text="선택 날짜")
         fig2.update_layout(margin=dict(l=10, r=10, t=60, b=10), legend_title_text="지표")
         st.plotly_chart(fig2, use_container_width=True)
 
